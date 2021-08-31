@@ -2,6 +2,10 @@ data "aws_cloudfront_cache_policy" "web_hosting" {
   name = "Managed-CachingOptimized"
 }
 
+resource "random_id" "s3_id" {
+  byte_length = 8
+}
+
 resource "aws_acm_certificate" "cert" {
   domain_name       = var.environment != "Prod" ? "${var.environment}.spiess.us" : "spiess.us"
   validation_method = "DNS"
@@ -23,9 +27,12 @@ resource "cloudflare_record" "web_hosting" {
       type  = dvo.resource_record_type
     }
   }
-  zone_id = var.cloudflare_zone_id
-#   type    = "CNAME"
+  
+  name    = each.value.name
+  value   = each.value.value
   ttl     = 1
+  type    = each.value.type
+  zone_id = var.cloudflare_zone_id
 }
 
 resource "aws_acm_certificate_validation" "web_hosting" {
@@ -55,9 +62,12 @@ resource "aws_s3_bucket_public_access_block" "web_hosting" {
 resource "aws_cloudfront_origin_access_identity" "web_hosting" {}
 
 resource "aws_cloudfront_distribution" "s3_distribution" {
+    depends_on = [
+      aws_acm_certificate_validation.web_hosting
+    ]
   origin {
     domain_name = aws_s3_bucket.web_hosting.bucket_regional_domain_name
-    origin_id   = local.s3_origin_id
+    origin_id   = random_id.s3_id.id
 
     s3_origin_config {
       origin_access_identity = aws_cloudfront_origin_access_identity.web_hosting.cloudfront_access_identity_path
@@ -71,10 +81,11 @@ resource "aws_cloudfront_distribution" "s3_distribution" {
   aliases = ["${var.environment}.spiess.us"]
 
   default_cache_behavior {
-    cache_policy_id = data.aws_cloudfront_cache_policy.web_hosting.id
+    cache_policy_id  = data.aws_cloudfront_cache_policy.web_hosting.id
     allowed_methods  = ["GET", "HEAD"]
     cached_methods   = ["GET", "HEAD"]
-    target_origin_id = local.s3_origin_id
+    compress         = true
+    target_origin_id = random_id.s3_id.id
 
     viewer_protocol_policy = "redirect-to-https"
   }
@@ -92,8 +103,40 @@ resource "aws_cloudfront_distribution" "s3_distribution" {
   }
 
   viewer_certificate {
-    acm_certificate_arn = data.some_certificate_id
+    acm_certificate_arn = aws_acm_certificate.cert.arn
     minimum_protocol_version = var.minimum_protocol_version
-    ssl_support_method = "sni_only"
+    ssl_support_method = "sni-only"
   }
+}
+
+resource "aws_s3_bucket_policy" "b" {
+    depends_on = [
+      aws_cloudfront_distribution.s3_distribution
+    ]
+  bucket = aws_s3_bucket.web_hosting.id
+
+  # Terraform's "jsonencode" function converts a
+  # Terraform expression's result to valid JSON syntax.
+  policy = jsonencode({
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "2",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "${aws_cloudfront_origin_access_identity.web_hosting.iam_arn}"
+            },
+            "Action": "s3:GetObject",
+            "Resource": "${aws_s3_bucket.web_hosting.arn}/*"
+        }
+    ]
+  })
+}
+
+resource "cloudflare_record" "web_hosting2" {
+  name    = "${var.environment}.spiess.us"
+  value   = aws_cloudfront_distribution.s3_distribution.domain_name
+  ttl     = 1
+  type    = "CNAME"
+  zone_id = var.cloudflare_zone_id
 }
