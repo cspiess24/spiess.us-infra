@@ -19,7 +19,7 @@ resource "aws_acm_certificate" "cert" {
   }
 }
 
-resource "cloudflare_record" "web_hosting" {
+resource "cloudflare_record" "validation" {
   for_each = {
     for dvo in aws_acm_certificate.cert.domain_validation_options : dvo.domain_name => {
       name  = dvo.resource_record_name
@@ -37,8 +37,7 @@ resource "cloudflare_record" "web_hosting" {
 
 resource "aws_acm_certificate_validation" "web_hosting" {
   certificate_arn         = aws_acm_certificate.cert.arn
-#   validation_record_fqdns = [for record in aws_route53_record.example : record.fqdn]
-  validation_record_fqdns = [for record in cloudflare_record.web_hosting : record.hostname]
+  validation_record_fqdns = [for record in cloudflare_record.validation : record.hostname]
 }
 
 resource "aws_s3_bucket" "web_hosting" {
@@ -109,14 +108,12 @@ resource "aws_cloudfront_distribution" "s3_distribution" {
   }
 }
 
-resource "aws_s3_bucket_policy" "b" {
+resource "aws_s3_bucket_policy" "web_hosting" {
     depends_on = [
       aws_cloudfront_distribution.s3_distribution
     ]
   bucket = aws_s3_bucket.web_hosting.id
 
-  # Terraform's "jsonencode" function converts a
-  # Terraform expression's result to valid JSON syntax.
   policy = jsonencode({
     "Version": "2012-10-17",
     "Statement": [
@@ -133,7 +130,7 @@ resource "aws_s3_bucket_policy" "b" {
   })
 }
 
-resource "cloudflare_record" "web_hosting2" {
+resource "cloudflare_record" "web_hosting" {
   name    = "${var.environment}.spiess.us"
   value   = aws_cloudfront_distribution.s3_distribution.domain_name
   ttl     = 1
