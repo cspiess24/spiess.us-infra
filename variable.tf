@@ -9,3 +9,7 @@ variable "environment" {
 variable "minimum_protocol_version" {
   default = "TLSv1.2_2021"
 }
+
+variable "cloudflare_zone_id" {
+  description = "Zone ID of the Cloudflare DNS zone"
+}
