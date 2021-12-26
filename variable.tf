@@ -13,3 +13,7 @@ variable "minimum_protocol_version" {
 variable "cloudflare_zone_id" {
   description = "Zone ID of the Cloudflare DNS zone"
 }
+
+variable "aws_assume_role" {
+  description = "Role to use for deploying AWS configs"
+}
